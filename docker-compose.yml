@@ -1,0 +1,65 @@
+services:
+  api:
+    build: ./api
+    environment:
+      PORT: "3000"
+      BASE_LATENCY_MS: "40"
+    ports:
+      - "3000:3000"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/health >/dev/null || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    networks:
+      - perf
+
+  influxdb:
+    image: influxdb:1.8
+    environment:
+      INFLUXDB_DB: k6
+    ports:
+      - "8086:8086"
+    volumes:
+      - influxdb_data:/var/lib/influxdb
+    networks:
+      - perf
+
+  grafana:
+    image: grafana/grafana:11.3.0
+    depends_on:
+      - influxdb
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    ports:
+      - "3001:3000"
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    networks:
+      - perf
+
+  k6:
+    image: grafana/k6:0.54.0
+    depends_on:
+      api:
+        condition: service_healthy
+      influxdb:
+        condition: service_started
+    environment:
+      API_BASE_URL: http://api:3000
+    volumes:
+      - ./k6/scripts:/scripts:ro
+    networks:
+      - perf
+    command: ["run", "/scripts/smoke.js"]
+
+volumes:
+  influxdb_data:
+  grafana_data:
+
+networks:
+  perf:

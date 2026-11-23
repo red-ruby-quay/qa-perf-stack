@@ -1,0 +1,41 @@
+name: Performance Smoke
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate compose file
+        run: docker compose config >/dev/null
+
+      - name: Validate dashboard JSON
+        run: node -e "JSON.parse(require('fs').readFileSync('grafana/dashboards/k6-overview.json', 'utf8'))"
+
+      - name: Start API and InfluxDB
+        run: docker compose up -d api influxdb
+
+      - name: Wait for API
+        run: |
+          for i in $(seq 1 30); do
+            if curl -fsS http://localhost:3000/health >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "API did not become healthy" >&2
+          exit 1
+
+      - name: Run k6 smoke
+        run: docker compose run --rm k6 run --out influxdb=http://influxdb:8086/k6 /scripts/smoke.js
+
+      - name: Stop stack
+        if: always()
+        run: docker compose down -v
